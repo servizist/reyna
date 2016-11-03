@@ -15,17 +15,19 @@ reyna/build.xml
 bin/
 gen/
 tmp/
+target/
 local.properties
 junit/
 reports/
-
-.idea/workspace.xml
+.idea/
 
 # backup files
 *.*~
 
-# eclipse meta
+# Editors meta
 .metadata
 lint.xml
 .checkstyle
-.idea/workspace.xml
+*.iml
+*.log
+
