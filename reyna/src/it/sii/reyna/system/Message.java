@@ -21,6 +21,8 @@ public class Message implements Serializable {
 
     private List<Header> headers;
 
+    private Integer numberOfTries;
+
     public Message(URI uri, String body) {
         this(null, uri, body, null, null, null);
     }
@@ -85,5 +87,13 @@ public class Message implements Serializable {
 
     public List<Header> getHeaders() {
         return headers;
+    }
+
+    public Integer getNumberOfTries() {
+        return numberOfTries;
+    }
+
+    public void setNumberOfTries(Integer numberOfTries) {
+        this.numberOfTries = numberOfTries;
     }
 }

@@ -8,64 +8,102 @@ import android.net.NetworkInfo;
 import android.text.TextUtils;
 import android.util.Log;
 import it.sad.sii.network.RestClient;
+import it.sad.sii.network.RestResponse;
 import it.sii.reyna.blackout.TimeRange;
 import it.sii.reyna.blackout.BlackoutTime;
+import it.sii.reyna.system.Header;
 import it.sii.reyna.system.Message;
 import it.sii.reyna.system.Preferences;
 
 import java.text.ParseException;
-import java.util.GregorianCalendar;
-import java.util.Locale;
+import java.util.*;
 
 public class Dispatcher {
 
     private static final String TAG = "Dispatcher";
 
-    public enum Result {
+    public enum ResultStatus {
         OK, PERMANENT_ERROR, TEMPORARY_ERROR, BLACKOUT, NOTCONNECTED
     }
 
-    public Result sendMessage(Context context, Message message) {
+    public static class Result {
+        private final ResultStatus status;
+        private final String data;
+
+        public Result(ResultStatus status, String data) {
+            this.status = status;
+            this.data = data;
+        }
+
+        public Result(ResultStatus status) {
+            this.status = status;
+            this.data = null;
+        }
+
+        public ResultStatus getStatus() {
+            return status;
+        }
+
+        public String getData() {
+            return data;
+        }
+    }
+
+    public static Result sendMessage(Context context, Message message) {
         Log.v(TAG, "sendMessage");
 
-        Result result = Dispatcher.canSend(context);
-        if(result != Result.OK) {
-            return result;
+        ResultStatus resultStatus = Dispatcher.canSend(context);
+        if(resultStatus != ResultStatus.OK) {
+            return new Result(resultStatus);
         }
 
         RestClient client;
         try {
             client = new RestClient(message.getUrl(), message.getUsername(),
-                                    message.getPassword(), 2000, null);
+                                    message.getPassword(), 5000, null);
 
         } catch (Exception e) {
-            Log.e(TAG, "parseHttpPost", e);
-            return Result.PERMANENT_ERROR;
+            Log.e(TAG, "Cannot create RestClient", e);
+            return new Result(resultStatus, e.getMessage());
         }
 
         try {
-            // TODO: add headers
-            int resultCode = client.post("", message.getBody());
-            return Dispatcher.getResult(resultCode);
+            //message.getHeaders().stream().collect(Collectors.toMap(Header::getKey, Header::getValue))
+            Map<String, String> headers = new HashMap<>();
+            for (Header header: message.getHeaders()) {
+                headers.put(header.getKey(), header.getValue());
+            }
+
+            RestResponse response = client.postResponse("", Collections.<String, String>emptyMap(),
+                                                        message.getBody(),
+                                                        headers);
+            if (response.isOk())
+                return new Result(ResultStatus.OK);
+            else if (response.isTransientFailure())
+                return new Result(ResultStatus.TEMPORARY_ERROR, response.getData());
+            else
+                return new Result(ResultStatus.PERMANENT_ERROR, response.getData());
         }
         catch (Exception e) {
-            Log.d(TAG, "tryToExecute", e);
-            Log.i(TAG, "tryToExecute: temporary error");
-            return Result.TEMPORARY_ERROR;
+            Log.d(TAG, "Exception in Dispatcher.sendMessage", e);
+            if (RestResponse.isTransientException(e))
+                return new Result(ResultStatus.TEMPORARY_ERROR, e.getMessage());
+            else
+                return new Result(ResultStatus.PERMANENT_ERROR, e.getMessage());
         }
     }
 
-    public static Result canSend(Context context) {
+    public static ResultStatus canSend(Context context) {
         return canSend(context, new GregorianCalendar());
     }
 
-    protected static Result canSend(Context context, GregorianCalendar now) {
+    protected static ResultStatus canSend(Context context, GregorianCalendar now) {
         Log.v(TAG, "canSend start");
         ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo info = connectivityManager.getActiveNetworkInfo();
         if (info == null || !info.isConnectedOrConnecting()) {
             Log.v(TAG, "not connected");
-            return Result.NOTCONNECTED;
+            return ResultStatus.NOTCONNECTED;
         }
 
         Preferences preferences = new Preferences(context);
@@ -75,7 +113,7 @@ public class Dispatcher {
         String endTime = preferences.getNonRecurringWwanBlackoutEndTimeAsString();
         if (isMobile(info) && isNonRecurringBlackout(startTime, endTime, now.getTimeInMillis())) {
             Log.v(TAG, "blackout because mobile and current time is within non recurring WWAN blackout period");
-            return Result.BLACKOUT;
+            return ResultStatus.BLACKOUT;
         }
 
         if (TextUtils.isEmpty(preferences.getWwanBlackout())) {
@@ -85,32 +123,32 @@ public class Dispatcher {
 
         if (Dispatcher.isBatteryCharging(context) && !preferences.canSendOnCharge()) {
             Log.v(TAG, "blackout because charging and cant send on charge");
-            return Result.BLACKOUT;
+            return ResultStatus.BLACKOUT;
         }
         if (!Dispatcher.isBatteryCharging(context) && !preferences.canSendOffCharge()) {
             Log.v(TAG, "blackout because not charging and cant send off charge");
-            return Result.BLACKOUT;
+            return ResultStatus.BLACKOUT;
         }
         if (isRoaming(info) && !preferences.canSendOnRoaming()) {
             Log.v(TAG, "blackout because roaming and cant send on roaming");
-            return Result.BLACKOUT;
+            return ResultStatus.BLACKOUT;
         }
         try {
             if (isWifi(info) && !canSendNow(blackoutTime, preferences.getWlanBlackout(), now)) {
                 Log.v(TAG, "blackout because wifi and cant send at " + preferences.getWlanBlackout());
-                return Result.BLACKOUT;
+                return ResultStatus.BLACKOUT;
             }
             if (isMobile(info) && !canSendNow(blackoutTime, preferences.getWwanBlackout(), now)) {
                 Log.v(TAG, "blackout because mobile and cant send at " + preferences.getWwanBlackout());
-                return Result.BLACKOUT;
+                return ResultStatus.BLACKOUT;
             }
         } catch (ParseException e) {
             Log.w(TAG, "canSend", e);
-            return Result.OK;
+            return ResultStatus.OK;
         }
 
         Log.v(TAG, "canSend ok");
-        return Result.OK;
+        return ResultStatus.OK;
     }
 
     private static boolean canSendNow(BlackoutTime blackoutTime, String window, GregorianCalendar now) throws ParseException {
@@ -161,19 +199,6 @@ public class Dispatcher {
             type == ConnectivityManager.TYPE_MOBILE_MMS ||
             type == ConnectivityManager.TYPE_MOBILE_SUPL ||
             type == ConnectivityManager.TYPE_WIMAX;
-    }
-
-    protected static Result getResult(int statusCode) {
-        Log.v(TAG, "getResult: " + statusCode);
-
-        if (statusCode >= 200 && statusCode < 300)
-            return Result.OK;
-        if (statusCode >= 300 && statusCode < 500)
-            return Result.PERMANENT_ERROR;
-        if (statusCode >= 500 && statusCode < 600)
-            return Result.TEMPORARY_ERROR;
-
-        return Result.PERMANENT_ERROR;
     }
 
     public static boolean isBatteryCharging(Context context) {

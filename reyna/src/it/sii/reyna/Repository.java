@@ -20,7 +20,7 @@ public class Repository extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "reyna.db";
 
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 3;
 
     private static final String TAG = "Repository";
 
@@ -35,7 +35,13 @@ public class Repository extends SQLiteOpenHelper {
     @Override
     public void onCreate(SQLiteDatabase db) {
         Log.v(TAG, "onCreate");
-        db.execSQL("CREATE TABLE Message (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT, body TEXT, username TEXT, password TEXT);");
+        db.execSQL("CREATE TABLE Message (" +
+                   "  id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                   "  url TEXT, " +
+                   "  body TEXT, " +
+                   "  username TEXT DEFAULT NULL, " +
+                   "  password TEXT DEFAULT NULL, " +
+                   "  tries_left DEFAULT 100);");
         db.execSQL("CREATE TABLE Header (id INTEGER PRIMARY KEY AUTOINCREMENT, messageid INTEGER, key TEXT, value TEXT, FOREIGN KEY(messageid) REFERENCES message(id));");
     }
 
@@ -48,6 +54,10 @@ public class Repository extends SQLiteOpenHelper {
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         Log.v(TAG, "onUpgrade");
+        db.execSQL("DROP TABLE Message");
+        db.execSQL("DROP TABLE Header");
+
+        onCreate(db);
     }
 
     public void insert(Message message) {
@@ -110,18 +120,19 @@ public class Repository extends SQLiteOpenHelper {
             }
 
             messageCursor = db.query("Message", new String[]{"id", "url",
-                    "body"}, selection, null, null, null, "id", "1");
+                    "body", "username", "password", "tries_left" }, selection, null, null, null, "id", "1");
             if (!messageCursor.moveToFirst())
                 return null;
 
-            long messageid = messageCursor.getLong(0);
+            long id = messageCursor.getLong(0);
             String url = messageCursor.getString(1);
             String body = messageCursor.getString(2);
             String username = messageCursor.getString(3);
             String password = messageCursor.getString(4);
+            Integer triesLeft = messageCursor.getInt(5);
 
             headersCursor = db.query("Header", new String[]{"id", "key",
-                            "value"}, "messageid = " + messageid, null, null, null,
+                            "value"}, "messageid = " + id, null, null, null,
                     null);
 
             ArrayList<Header> headers = new ArrayList<Header>();
@@ -130,8 +141,11 @@ public class Repository extends SQLiteOpenHelper {
                         .getString(1), headersCursor.getString(2)));
             }
 
-            return new Message(messageid, new URI(url), body, username, password, headers);
-        } finally {
+            Message message = new Message(messageId, new URI(url), body, username, password, headers);
+            message.setNumberOfTries(triesLeft);
+            return message;
+        }
+        finally {
             if (messageCursor != null)
                 messageCursor.close();
             if (headersCursor != null)
@@ -224,6 +238,7 @@ public class Repository extends SQLiteOpenHelper {
             values.put("body", message.getBody());
             values.put("username", message.getUsername());
             values.put("password", message.getPassword());
+            values.put("tries_left", message.getNumberOfTries());
 
             long messageId = db.insert("Message", null, values);
             this.addHeaders(db, messageId, message.getHeaders());
@@ -403,6 +418,30 @@ public class Repository extends SQLiteOpenHelper {
         } finally {
             if (cursor != null) {
                 cursor.close();
+            }
+        }
+    }
+
+    public void decrementMessageTries(Message message) {
+        Log.v(TAG, "decrementTries");
+        SQLiteDatabase db = this.getWritableDatabase();
+        try {
+            db.beginTransaction();
+            int numberOfTriesLeft = message.getNumberOfTries() - 1;
+            message.setNumberOfTries(numberOfTriesLeft);
+            ContentValues values = new ContentValues();
+            values.put("tries_left", numberOfTriesLeft);
+
+            long messageId = db.update("Message", values, "id = ?", new String[] { message.getId().toString() });
+            db.setTransactionSuccessful();
+
+            Log.v("reyna", "Repository: decremented tries for message " + messageId);
+        }
+        finally {
+            if (db != null) {
+                if (db.inTransaction())
+                    db.endTransaction();
+                db.close();
             }
         }
     }

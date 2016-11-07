@@ -5,7 +5,7 @@ import android.content.Intent;
 import android.support.v4.content.WakefulBroadcastReceiver;
 import android.util.Log;
 import it.sii.reyna.Dispatcher;
-import it.sii.reyna.Dispatcher.Result;
+import it.sii.reyna.Dispatcher.ResultStatus;
 
 import it.sii.reyna.messageProvider.IMessageProvider;
 import it.sii.reyna.messageProvider.MessageProvider;
@@ -21,9 +21,7 @@ public class ForwardService extends WakefulService {
 
     protected static final long SLEEP_MILLISECONDS = 1000; // 1 second
 
-    protected static final long TEMPORARY_ERROR_MILLISECONDS = 300000; // 5 minutes
-
-    protected Dispatcher dispatcher;
+    protected static final long TEMPORARY_ERROR_MILLISECONDS = 1 * 60 * 1000; // 1 minute
 
     protected PeriodicBackoutCheck periodicBackoutCheck;
 
@@ -34,7 +32,6 @@ public class ForwardService extends WakefulService {
 
         Log.v(TAG, "ForwardService()");
 
-        this.dispatcher = new Dispatcher();
         this.periodicBackoutCheck = new PeriodicBackoutCheck(this);
         this.repository = new Repository(this);
     }
@@ -61,8 +58,8 @@ public class ForwardService extends WakefulService {
                 return;
             }
 
-            Result canSend = Dispatcher.canSend(this);
-            if (canSend != Result.OK) {
+            ResultStatus canSend = Dispatcher.canSend(this);
+            if (canSend != ResultStatus.OK) {
                 Log.v(TAG, "ForwardService: cannot send " + canSend);
                 return;
             }
@@ -74,27 +71,26 @@ public class ForwardService extends WakefulService {
 
             Message message = messageProvider.getNext();
             while(message != null) {
-
-                // TODO: check this is OK
                 Thread.sleep(SLEEP_MILLISECONDS);
 
                 Log.v(TAG, "ForwardService: processing message " + message.getId());
 
-                Result result = dispatcher.sendMessage(this, message);
+                ResultStatus resultStatus = Dispatcher.sendMessage(this, message).getStatus();
 
-                Log.i(TAG, "ForwardService: send message result: " + result.toString());
+                Log.i(TAG, "ForwardService: send message result: " + resultStatus.toString());
 
-                if(result == Result.TEMPORARY_ERROR) {
+                if(resultStatus == ResultStatus.TEMPORARY_ERROR) {
                     Log.i(TAG, "ForwardService: temporary error, backing off...");
-
+                    messageProvider.recordTemporaryError(message);
                     this.periodicBackoutCheck.record(ForwardService.PERIODIC_BACKOUT_TEMPORARY_ERROR);
                     return;
                 }
 
-                if(result == Result.BLACKOUT || result == Result.NOTCONNECTED) {
+                if(resultStatus == ResultStatus.BLACKOUT || resultStatus == ResultStatus.NOTCONNECTED) {
                     return;
                 }
 
+                // OK or Permanent Error
                 messageProvider.delete(message);
                 message = messageProvider.getNext();
             }

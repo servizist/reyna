@@ -12,4 +12,6 @@ public interface IMessageProvider {
     void close();
 
     boolean canSend();
+
+    void recordTemporaryError(Message message);
 }

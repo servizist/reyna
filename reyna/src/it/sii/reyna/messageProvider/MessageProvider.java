@@ -49,6 +49,21 @@ public class MessageProvider implements IMessageProvider {
         return true;
     }
 
+    @Override
+    public void recordTemporaryError(Message message) {
+        Log.v(MessageProvider.TAG, "recordTemporaryError");
+        if (message.getNumberOfTries() != null) {
+            if (message.getNumberOfTries() > 0) {
+                Log.v(MessageProvider.TAG, "recordTemporaryError -> decrementTries: " + message.getNumberOfTries().toString());
+                this.repository.decrementMessageTries(message);
+            }
+            else {
+                this.repository.delete(message);
+                Log.v(MessageProvider.TAG, "recordTemporaryError -> delete");
+            }
+        }
+    }
+
     private void addReynaSpecificHeaders(Message message) {
         Log.v(MessageProvider.TAG, "addReynaSpecificHeaders");
         Header header = new Header("reyna-id", message.getId().toString());

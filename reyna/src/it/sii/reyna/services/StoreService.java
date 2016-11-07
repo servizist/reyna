@@ -18,7 +18,7 @@ public class StoreService extends WakefulService {
 
     private static final long MINIMUM_STORAGE_LIMIT = 1867776; // 1Mb 800Kb
 
-    private static final String MESSAGE = "com.b2msolutions.reyna.MESSAGE";
+    private static final String MESSAGE = "MESSAGE";
 
     private Preferences preferences = null;
 
@@ -150,7 +150,6 @@ public class StoreService extends WakefulService {
                 this.repository.insert(message);
             }
             else {
-
                 this.repository.insert(message, getStorageSizeLimit(this));
             }
 
